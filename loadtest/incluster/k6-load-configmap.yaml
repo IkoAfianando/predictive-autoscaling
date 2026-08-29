@@ -1,0 +1,134 @@
+# =============================================================================
+# k6 load script, packaged as a ConfigMap so it can be mounted into an in-cluster
+# k6 Job (no local file, no port-forward). The Job (k6-job.yaml) mounts this at
+# /scripts/scale_incluster.js and runs it with `k6 run`.
+#
+# PROFILE (mirrors loadtest/scenarios/scale_clean.js):
+#   ramp UP -> spike -> hold high -> ramp DOWN to a light off-peak floor (5 VU,
+#   not zero) -> sustain. The light-but-nonzero off-peak tail keeps a measurable,
+#   low P95 so the hybrid/predictive controller performs a clean scale-DOWN
+#   instead of falling off a cliff to idle.
+#
+# TARGETING: URLs come ENTIRELY from env (BASE_USER / BASE_PRODUCT / BASE_ORDER),
+#   which the Job sets to the in-cluster ClusterIP DNS names, e.g.
+#     BASE_USER=http://go-user.pas-thesis.svc.cluster.local:8080
+#   There is NO port map and NO localhost fallback here on purpose: in-cluster we
+#   always talk to services by DNS, so a missing env should fail loudly.
+#
+# WORKLOAD: the same realistic 5-step e-commerce flow used by the demo/ablation
+#   suite (register -> login -> product create -> product get -> order create).
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-load-script
+  namespace: pas-thesis
+  labels:
+    app.kubernetes.io/part-of: pas-thesis
+    app.kubernetes.io/component: loadtest
+data:
+  scale_incluster.js: |
+    import http from 'k6/http';
+    import { check, sleep } from 'k6';
+    import { Trend, Counter } from 'k6/metrics';
+
+    // --- Target resolution: env-only, no localhost fallback --------------------
+    // In-cluster we ALWAYS address services by ClusterIP DNS. If the Job forgot
+    // to inject one of these, fail fast rather than silently hammer localhost.
+    const STACK = __ENV.STACK || 'unknown';
+    const U = __ENV.BASE_USER;
+    const P = __ENV.BASE_PRODUCT;
+    const O = __ENV.BASE_ORDER;
+    if (!U || !P || !O) {
+      throw new Error(
+        'BASE_USER / BASE_PRODUCT / BASE_ORDER must all be set (in-cluster DNS URLs). ' +
+        `Got BASE_USER=${U} BASE_PRODUCT=${P} BASE_ORDER=${O}`
+      );
+    }
+
+    // --- Custom metrics (same names as the demo/ablation suite so downstream
+    //     analysis treats in-cluster runs identically) ------------------------
+    const workloadDuration   = new Trend('workload_duration', true);
+    const registerDuration   = new Trend('step_register_duration', true);
+    const loginDuration      = new Trend('step_login_duration', true);
+    const productPostDuration = new Trend('step_product_post_duration', true);
+    const productGetDuration  = new Trend('step_product_get_duration', true);
+    const orderDuration      = new Trend('step_order_duration', true);
+    const workloadErrors     = new Counter('workload_errors');
+
+    // --- Load profile: ramp up -> spike -> hold -> down to light -> sustain ----
+    // Overridable via env so a runner can lengthen/shorten without editing the
+    // ConfigMap (SPIKE = peak VUs, LIGHT = off-peak floor, SUSTAIN = tail secs).
+    const SPIKE   = parseInt(__ENV.SPIKE   || '130', 10);
+    const HOLD_VU = parseInt(__ENV.HOLD_VU || '100', 10);
+    const LIGHT   = parseInt(__ENV.LIGHT   || '5',   10);
+    const SUSTAIN = __ENV.SUSTAIN || '150s';
+    const THINK   = parseFloat(__ENV.THINK || '0.3');
+
+    export const options = {
+      scenarios: {
+        clean: {
+          executor: 'ramping-vus',
+          startVUs: 2,
+          gracefulStop: '5s',
+          stages: [
+            { duration: '30s',  target: 10 },
+            { duration: '45s',  target: 70 },
+            { duration: '30s',  target: SPIKE },   // spike -> scale up
+            { duration: '60s',  target: HOLD_VU }, // hold high
+            { duration: '45s',  target: 20 },
+            { duration: '30s',  target: LIGHT },   // down to light off-peak
+            { duration: SUSTAIN, target: LIGHT },  // sustain floor -> clean scale down
+          ],
+        },
+      },
+      thresholds: {},
+    };
+
+    const JSON_HEADERS = { headers: { 'content-type': 'application/json' } };
+
+    export default function () {
+      const start = Date.now();
+      const tag = { stack: STACK };
+      // Unique username per VU/iteration so register never collides on UNIQUE.
+      const username = `icl_${STACK}_${__VU}_${__ITER}_${Date.now()}`;
+      const password = 'pw123';
+
+      // 1. Register (bcrypt hash — CPU path)
+      const reg = http.post(`${U}/users/register`,
+        JSON.stringify({ username, password }),
+        { ...JSON_HEADERS, tags: { ...tag, step: 'register' } });
+      registerDuration.add(reg.timings.duration, tag);
+      if (!check(reg, { 'register 2xx/409': (r) => [200,201,409].includes(r.status) })) workloadErrors.add(1, tag);
+      let userId = 1; try { userId = reg.json('id') || 1; } catch (_) { userId = 1; }
+
+      // 2. Login (bcrypt verify — CPU path)
+      const login = http.post(`${U}/users/login`,
+        JSON.stringify({ username, password }),
+        { ...JSON_HEADERS, tags: { ...tag, step: 'login' } });
+      loginDuration.add(login.timings.duration, tag);
+      if (!check(login, { 'login 200/401': (r) => [200,401].includes(r.status) })) workloadErrors.add(1, tag);
+
+      // 3. Create product (Postgres write + cache invalidate)
+      const prod = http.post(`${P}/products`,
+        JSON.stringify({ name: `widget-${username}`, price: 1.5 }),
+        { ...JSON_HEADERS, tags: { ...tag, step: 'product_post' } });
+      productPostDuration.add(prod.timings.duration, tag);
+      if (!check(prod, { 'product 2xx': (r) => [200,201].includes(r.status) })) workloadErrors.add(1, tag);
+      let productId = 1; try { productId = prod.json('id') || 1; } catch (_) { productId = 1; }
+
+      // 4. Get product (Redis read-through cache path)
+      const get = http.get(`${P}/products/${productId}`, { tags: { ...tag, step: 'product_get' } });
+      productGetDuration.add(get.timings.duration, tag);
+      if (!check(get, { 'product get 200': (r) => r.status === 200 })) workloadErrors.add(1, tag);
+
+      // 5. Create order (HTTP fan-out to User + Product)
+      const order = http.post(`${O}/orders`,
+        JSON.stringify({ user_id: userId, product_id: productId, qty: 1 }),
+        { ...JSON_HEADERS, tags: { ...tag, step: 'order' } });
+      orderDuration.add(order.timings.duration, tag);
+      if (!check(order, { 'order 2xx': (r) => [200,201].includes(r.status) })) workloadErrors.add(1, tag);
+
+      workloadDuration.add(Date.now() - start, tag);
+      if (THINK > 0) sleep(THINK);
+    }

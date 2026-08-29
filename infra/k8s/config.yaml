@@ -1,0 +1,26 @@
+# Shared configuration for all backend services.
+# - app-common-config: parity env identical across every stack (SPEC §2/§5).
+# - db-credentials:    Postgres user/password, referenced to build DATABASE_URL.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-common-config
+  namespace: pas-thesis
+data:
+  PORT: "8080"
+  REDIS_URL: "redis://redis:6379"
+  BCRYPT_COST: "10"
+  DB_POOL_MAX: "20"
+  CACHE_TTL_SECONDS: "30"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-credentials
+  namespace: pas-thesis
+type: Opaque
+stringData:
+  username: "appuser"
+  password: "appsecret"

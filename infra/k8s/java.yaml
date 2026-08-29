@@ -1,0 +1,224 @@
+# =============================================================
+# JAVA stack — user / product / order
+# Deployment + ClusterIP Service (port 8080) per service.
+# =============================================================
+---
+# java-user — java stack, user service (dev host port 8021 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-user
+  namespace: pas-thesis
+  labels:
+    app: java-user
+    stack: java
+    service: user
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: java-user }
+  template:
+    metadata:
+      labels:
+        app: java-user
+        stack: java
+        service: user
+    spec:
+      containers:
+        - name: java-user
+          image: pas/java:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "user"
+            - name: STACK_NAME
+              value: "java"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/java_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-user
+  namespace: pas-thesis
+  labels: { app: java-user }
+spec:
+  type: ClusterIP
+  selector: { app: java-user }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# java-product — java stack, product service (dev host port 8022 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-product
+  namespace: pas-thesis
+  labels:
+    app: java-product
+    stack: java
+    service: product
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: java-product }
+  template:
+    metadata:
+      labels:
+        app: java-product
+        stack: java
+        service: product
+    spec:
+      containers:
+        - name: java-product
+          image: pas/java:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "product"
+            - name: STACK_NAME
+              value: "java"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/java_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-product
+  namespace: pas-thesis
+  labels: { app: java-product }
+spec:
+  type: ClusterIP
+  selector: { app: java-product }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# java-order — java stack, order service (dev host port 8023 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: java-order
+  namespace: pas-thesis
+  labels:
+    app: java-order
+    stack: java
+    service: order
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: java-order }
+  template:
+    metadata:
+      labels:
+        app: java-order
+        stack: java
+        service: order
+    spec:
+      containers:
+        - name: java-order
+          image: pas/java:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "order"
+            - name: STACK_NAME
+              value: "java"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/java_db"
+            - name: USER_SERVICE_URL
+              value: "http://java-user:8080"
+            - name: PRODUCT_SERVICE_URL
+              value: "http://java-product:8080"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: java-order
+  namespace: pas-thesis
+  labels: { app: java-order }
+spec:
+  type: ClusterIP
+  selector: { app: java-order }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

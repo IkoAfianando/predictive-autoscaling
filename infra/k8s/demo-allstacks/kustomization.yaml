@@ -1,0 +1,98 @@
+# =============================================================
+# VISUAL predictive-scaling demo overlay — ALL FOUR STACKS.
+#
+#   kubectl apply -k infra/k8s/demo-allstacks
+#
+# Superset of infra/k8s/demo (which is go-only). Deploys the shared infra
+# (config + postgres + redis + in-cluster Prometheus) PLUS all four backend
+# stacks (go / rust / java / node, 3 services each = 12 deployments) with
+# tiny resource requests so many replicas schedule on the local cluster and
+# the predictive controller can drive every stack 1 -> N -> 1.
+#
+# SELF-CONTAINED on purpose: every resource file lives in this directory (no
+# `../` references) so `kustomize build` works under ArgoCD's default
+# load-restrictor (LoadRestrictionsRootOnly). This is the exact path the
+# ArgoCD `pas-thesis` Application syncs.
+#
+# NO HorizontalPodAutoscaler: the predictive controller is the ONLY thing that
+# drives replicas here. Delete any stray HPA with `kubectl delete hpa --all -n
+# pas-thesis` for a clean predictive-only timeline.
+# =============================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: pas-thesis
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - go.yaml
+  - rust.yaml
+  - java.yaml
+  - node.yaml
+  - prometheus.yaml
+
+# pg-init mounts init.sql into postgres (creates go_db / rust_db / java_db / node_db).
+configMapGenerator:
+  - name: pg-init
+    files:
+      - init.sql
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+patches:
+  # --- Shrink go / rust / node pods so 1 -> 4 replicas schedule comfortably. ---
+  #   Tiny REQUESTS (reservations) but a generous CPU LIMIT so a loaded pod
+  #   under the port-forward stays responsive instead of melting.
+  - target:
+      kind: Deployment
+      name: "(go|rust|node)-.*"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "1000m"
+            memory: "256Mi"
+  # --- Java (Spring Boot) needs more heap + a slower, more forgiving start. ---
+  - target:
+      kind: Deployment
+      name: "java-.*"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: "100m"
+            memory: "320Mi"
+          limits:
+            cpu: "1500m"
+            memory: "768Mi"
+  # --- Relax every stack's probes: a heavily-loaded pod (or a slow JVM cold
+  #     start) must NOT be killed mid-run (that churns pods + resets metrics). ---
+  - target:
+      kind: Deployment
+      name: "(go|rust|java|node)-.*"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/readinessProbe
+        value:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 12
+      - op: replace
+        path: /spec/template/spec/containers/0/livenessProbe
+        value:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 12

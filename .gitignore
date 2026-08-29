@@ -1,0 +1,25 @@
+# build artifacts
+target/
+node_modules/
+dist/
+build/
+*.class
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# trained models and collected data (large; regenerate with the ML pipeline)
+ml/models/*.keras
+ml/models/*.pkl
+ml/models/*.pt
+ml/models/*.h5
+
+# runtime output
+logs/
+results/
+*.log
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

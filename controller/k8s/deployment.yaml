@@ -1,0 +1,90 @@
+# Deployment for the predictive controller itself.
+# Single replica: it is a control loop, not a horizontally-scaled workload.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: predictive-controller
+  namespace: autoscale
+  labels:
+    app: predictive-controller
+    role: autoscaler
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate            # only ever one control loop at a time
+  selector:
+    matchLabels:
+      app: predictive-controller
+  template:
+    metadata:
+      labels:
+        app: predictive-controller
+        role: autoscaler
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9095"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: predictive-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+      containers:
+        - name: controller
+          image: predictive-controller:latest    # push to your registry & pin a tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9095
+          env:
+            - name: PREDICT_URL
+              value: "http://ml-serve.autoscale.svc.cluster.local:8000/predict"
+            - name: NAMESPACE
+              value: "autoscale"
+            - name: SCALE_UP_THRESHOLD
+              value: "200"
+            - name: SCALE_DOWN_THRESHOLD
+              value: "80"
+            - name: MIN_REPLICAS
+              value: "1"
+            - name: MAX_REPLICAS
+              value: "10"
+            - name: INTERVAL_SECONDS
+              value: "15"
+            - name: COOLDOWN_SECONDS
+              value: "60"
+            - name: DRY_RUN
+              value: "false"
+            - name: METRICS_PORT
+              value: "9095"
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+          volumeMounts:
+            - name: decision-logs
+              mountPath: /app/logs
+      volumes:
+        # decisions.jsonl = evaluation data. Swap emptyDir for a PVC to persist
+        # it across restarts when collecting the Bab IV dataset.
+        - name: decision-logs
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: predictive-controller
+  namespace: autoscale
+  labels:
+    app: predictive-controller
+spec:
+  selector:
+    app: predictive-controller
+  ports:
+    - name: metrics
+      port: 9095
+      targetPort: 9095

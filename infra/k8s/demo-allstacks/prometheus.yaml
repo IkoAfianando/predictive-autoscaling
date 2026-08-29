@@ -1,0 +1,150 @@
+# =============================================================
+# In-cluster Prometheus for the VISUAL predictive-scaling demo.
+#
+# Scrapes the pas-thesis application pods directly via Kubernetes
+# pod service-discovery, so http_request_duration_seconds (+ the
+# process_* metrics) from every live go/rust/java/node pod are
+# available INSIDE the cluster — the source of truth the live
+# ml/serve.py pulls its real-time window from.
+#
+# Port-forward it to the laptop for the demo:
+#   kubectl -n pas-thesis port-forward svc/prometheus-demo 9092:9090
+# =============================================================
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-demo
+  namespace: pas-thesis
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-demo
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "endpoints", "services", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-demo
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-demo
+    namespace: pas-thesis
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-demo-config
+  namespace: pas-thesis
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      scrape_timeout: 4s
+      evaluation_interval: 5s
+      external_labels:
+        project: predictive-autoscaling-thesis
+        source: in-cluster
+    scrape_configs:
+      # Discover every pas-thesis application pod (go/rust/java/node) and
+      # scrape its :8080/metrics endpoint. New replicas appear automatically
+      # as they are created by the predictive controller.
+      - job_name: pas-pods
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [pas-thesis]
+        relabel_configs:
+          # keep only the application pods (they carry a stack= label)
+          - source_labels: [__meta_kubernetes_pod_label_stack]
+            regex: (go|rust|java|node)
+            action: keep
+          # keep only the :8080 app container port target
+          - source_labels: [__meta_kubernetes_pod_container_port_number]
+            regex: "8080"
+            action: keep
+          # only scrape running pods
+          - source_labels: [__meta_kubernetes_pod_phase]
+            regex: Running
+            action: keep
+          # expose the pod name for per-replica debugging.
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_service]
+            target_label: k8s_service
+          # Inject stack= / service= as TARGET labels so they land on EVERY
+          # metric the pod exposes — not just http_request_duration_seconds
+          # (which the app labels itself), but also the default client-library
+          # metrics process_cpu_seconds_total / process_resident_memory_bytes.
+          # Those carry no stack label of their own, so without this the ML
+          # `cpu` / `memory` features are always 0 in live mode and the
+          # cpu/memory-dependent models (java, node) predict a garbage baseline.
+          - source_labels: [__meta_kubernetes_pod_label_stack]
+            target_label: stack
+          - source_labels: [__meta_kubernetes_pod_label_service]
+            target_label: service
+      # Prometheus self-scrape (health).
+      - job_name: prometheus-demo
+        static_configs:
+          - targets: ["localhost:9090"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-demo
+  namespace: pas-thesis
+  labels: { app: prometheus-demo }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: prometheus-demo }
+  template:
+    metadata:
+      labels: { app: prometheus-demo }
+    spec:
+      serviceAccountName: prometheus-demo
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.53.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=2h"
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-demo-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-demo
+  namespace: pas-thesis
+  labels: { app: prometheus-demo }
+spec:
+  type: ClusterIP
+  selector: { app: prometheus-demo }
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090

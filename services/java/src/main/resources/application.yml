@@ -1,0 +1,49 @@
+# Predictive Auto-Scaling Thesis — Java stack configuration.
+# All parity-critical values come from the shared SPEC.md (§2, §5).
+server:
+  port: ${PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: java-${SERVICE_NAME:user}
+  # Redis (Lettuce) — Spring Data Redis auto-config reads this URL.
+  data:
+    redis:
+      url: ${REDIS_URL:redis://localhost:6379}
+      timeout: 5s
+  # We build the DataSource manually (DataSourceConfig) from DATABASE_URL,
+  # so disable Spring Boot's own JDBC auto-init of a URL it cannot parse.
+  sql:
+    init:
+      mode: never
+
+# Application settings (SPEC §2, §5). Bound into AppProperties.
+app:
+  service-name: ${SERVICE_NAME:user}
+  stack-name: ${STACK_NAME:java}
+  bcrypt-cost: ${BCRYPT_COST:10}
+  db-pool-max: ${DB_POOL_MAX:20}
+  cache-ttl-seconds: ${CACHE_TTL_SECONDS:30}
+  database-url: ${DATABASE_URL:postgres://appuser:appsecret@localhost:5432/java_db}
+  redis-url: ${REDIS_URL:redis://localhost:6379}
+  user-service-url: ${USER_SERVICE_URL:http://java-user:8080}
+  product-service-url: ${PRODUCT_SERVICE_URL:http://java-product:8080}
+  fanout-timeout-ms: 5000
+  readiness-timeout-ms: 30000
+
+# Actuator: keep the default /actuator paths for internal use. The SPEC-required
+# plain GET /metrics is served by MetricsController from the same registry.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+logging:
+  level:
+    root: INFO

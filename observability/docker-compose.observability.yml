@@ -1,0 +1,120 @@
+# Observability stack: Prometheus + Grafana + OpenTelemetry Collector
+# Predictive Auto-Scaling Thesis
+#
+# This stack joins the SAME docker network as the backend services so it can
+# resolve service DNS names (go-user, rust-order, ...). The network is declared
+# `external` here — the main services compose is expected to create it.
+#
+# Create the shared network once (if the main compose does not already):
+#   docker network create thesis-net
+#
+# The main services compose must attach every backend service to `thesis-net`.
+#
+# Run:  docker compose -f docker-compose.observability.yml up -d
+
+name: thesis-observability
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-remote-write-receiver"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9091:9090"
+    networks:
+      - thesis-net
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - thesis-net
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.108.0
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel/otel-collector-config.yaml"]
+    volumes:
+      - ./otel/otel-collector-config.yaml:/etc/otel/otel-collector-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # docker_stats receiver (apple-to-apple resource metrics)
+    user: "0:0"   # needed to read the docker socket
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus exporter (scraped by Prometheus)
+      - "8888:8888"   # Collector internal telemetry
+      - "13133:13133" # health_check
+      - "55679:55679" # zpages web UI
+    depends_on:
+      - prometheus
+    networks:
+      - thesis-net
+
+  # Distributed tracing backend + UI. The OTel Collector forwards traces here
+  # over the internal network (jaeger:4317). We deliberately do NOT publish
+  # Jaeger's own OTLP ports (4317/4318) to the host because they would collide
+  # with the otel-collector's published OTLP ports. Only the Jaeger UI is
+  # published, on host 16687 -> container 16686 (16686 is the Jaeger default;
+  # 16687 avoids any collision with a locally-running Jaeger).
+  jaeger:
+    image: jaegertracing/all-in-one:1.60
+    container_name: thesis-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"   # Jaeger listens OTLP on 4317/4318 INTERNALLY (not published)
+    ports:
+      - "16687:16686"   # Jaeger UI
+    networks:
+      - thesis-net
+
+  # Apple-to-apple container resource metrics (CPU / memory / RSS) — identical
+  # methodology for Go/Rust/Java/Node, language-agnostic.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: thesis-cadvisor
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "8085:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks:
+      - thesis-net
+
+volumes:
+  prometheus-data:
+  grafana-data:
+
+
+networks:
+  thesis-net:
+    external: true
+    name: thesis-net

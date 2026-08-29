@@ -1,0 +1,230 @@
+# =============================================================
+# GO stack — user / product / order
+# Deployment + ClusterIP Service (port 8080) per service.
+# =============================================================
+---
+# go-user — go stack, user service (dev host port 8001 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-user
+  namespace: pas-thesis
+  labels:
+    app: go-user
+    stack: go
+    service: user
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: go-user }
+  template:
+    metadata:
+      labels:
+        app: go-user
+        stack: go
+        service: user
+    spec:
+      containers:
+        - name: go-user
+          image: pas/go:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "user"
+            - name: STACK_NAME
+              value: "go"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/go_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Relaxed for the saturation demo: a heavily-loaded pod must NOT be
+          # killed mid-run (that would churn pods and reset live metrics).
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-user
+  namespace: pas-thesis
+  labels: { app: go-user }
+spec:
+  type: ClusterIP
+  selector: { app: go-user }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# go-product — go stack, product service (dev host port 8002 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-product
+  namespace: pas-thesis
+  labels:
+    app: go-product
+    stack: go
+    service: product
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: go-product }
+  template:
+    metadata:
+      labels:
+        app: go-product
+        stack: go
+        service: product
+    spec:
+      containers:
+        - name: go-product
+          image: pas/go:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "product"
+            - name: STACK_NAME
+              value: "go"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/go_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Relaxed for the saturation demo: a heavily-loaded pod must NOT be
+          # killed mid-run (that would churn pods and reset live metrics).
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-product
+  namespace: pas-thesis
+  labels: { app: go-product }
+spec:
+  type: ClusterIP
+  selector: { app: go-product }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# go-order — go stack, order service (dev host port 8003 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-order
+  namespace: pas-thesis
+  labels:
+    app: go-order
+    stack: go
+    service: order
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: go-order }
+  template:
+    metadata:
+      labels:
+        app: go-order
+        stack: go
+        service: order
+    spec:
+      containers:
+        - name: go-order
+          image: pas/go:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "order"
+            - name: STACK_NAME
+              value: "go"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/go_db"
+            - name: USER_SERVICE_URL
+              value: "http://go-user:8080"
+            - name: PRODUCT_SERVICE_URL
+              value: "http://go-product:8080"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          # Relaxed for the saturation demo: a heavily-loaded pod must NOT be
+          # killed mid-run (that would churn pods and reset live metrics).
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 10
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: go-order
+  namespace: pas-thesis
+  labels: { app: go-order }
+spec:
+  type: ClusterIP
+  selector: { app: go-order }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

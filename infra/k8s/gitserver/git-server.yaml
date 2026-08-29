@@ -1,0 +1,80 @@
+# =============================================================
+# In-cluster git server (git:// protocol, read-only clone) so ArgoCD's
+# repo-server has a git source it can reach WITHOUT any GitHub remote.
+#
+# The repo content (a bare clone of this project's infra/) is loaded into the
+# pod's emptyDir with `kubectl cp` after the pod starts (see
+# docs/ARGOCD-AND-ALLSTACKS-DEMO.md). `git daemon --export-all` then serves it
+# for anonymous clone at:
+#
+#     git://git-server.git-server.svc.cluster.local:9418/pas.git
+#
+# ArgoCD clones that URL and runs `kustomize build infra/k8s/demo-allstacks`.
+# =============================================================
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: git-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-server
+  namespace: git-server
+  labels: { app: git-server }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: git-server }
+  template:
+    metadata:
+      labels: { app: git-server }
+    spec:
+      containers:
+        - name: git-daemon
+          image: alpine:3.20
+          # `git daemon` lives in the separate `git-daemon` apk package (the
+          # alpine/git image omits it), so install both then serve every repo
+          # under /srv/git for anonymous clone over git://.
+          command: ["sh", "-c"]
+          args:
+            - |
+              apk add --no-cache git git-daemon
+              mkdir -p /srv/git
+              exec git daemon \
+                --reuseaddr \
+                --verbose \
+                --informative-errors \
+                --base-path=/srv/git \
+                --export-all \
+                /srv/git
+          ports:
+            - containerPort: 9418
+          readinessProbe:
+            tcpSocket: { port: 9418 }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests: { cpu: "10m", memory: "32Mi" }
+            limits: { cpu: "200m", memory: "128Mi" }
+          volumeMounts:
+            - name: repos
+              mountPath: /srv/git
+      volumes:
+        - name: repos
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-server
+  namespace: git-server
+  labels: { app: git-server }
+spec:
+  type: ClusterIP
+  selector: { app: git-server }
+  ports:
+    - name: git
+      port: 9418
+      targetPort: 9418

@@ -1,0 +1,46 @@
+# Redis 7 — single shared cache instance. Keys are namespaced per stack
+# ({stack}:product:{id}) by the services, so one instance is sufficient.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: pas-thesis
+  labels: { app: redis }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7
+          args: ["--appendonly", "no", "--save", ""]
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "128Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: pas-thesis
+spec:
+  type: ClusterIP
+  selector: { app: redis }
+  ports:
+    - port: 6379
+      targetPort: 6379

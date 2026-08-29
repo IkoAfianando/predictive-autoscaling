@@ -1,0 +1,15 @@
+# Grafana dashboard provider
+apiVersion: 1
+
+providers:
+  - name: thesis-dashboards
+    orgId: 1
+    folder: Predictive Auto-Scaling
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

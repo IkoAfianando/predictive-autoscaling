@@ -1,0 +1,82 @@
+# =============================================================================
+# In-cluster k6 load Job. Runs the k6 script from the k6-load-script ConfigMap
+# entirely INSIDE the cluster, so the load generator reaches the target services
+# over stable ClusterIP DNS instead of a flaky `kubectl port-forward`. This makes
+# auto-scaling tests robust to pod churn: when the controller scales a Deployment
+# up/down and pods come and go, the ClusterIP Service keeps routing — a
+# port-forward, by contrast, is pinned to a single pod and dies when that pod is
+# replaced.
+#
+# PARAMETERISATION: the token __STACK__ is a placeholder. run_incluster_scaling.sh
+# substitutes it (go|rust|java|node) before `kubectl apply`, so the same manifest
+# drives any stack. The BASE_* env vars point k6 at that stack's three services.
+#
+# k6 logs (the run report) go to stdout -> retrievable with `kubectl logs`.
+# restartPolicy: Never + backoffLimit: 0 so a run is not silently retried.
+# =============================================================================
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load-__STACK__
+  namespace: pas-thesis
+  labels:
+    app.kubernetes.io/part-of: pas-thesis
+    app.kubernetes.io/component: loadtest
+    loadtest.stack: "__STACK__"
+spec:
+  backoffLimit: 0
+  # Auto-clean finished Jobs after 1h (leaves time to grab logs, then GCs).
+  ttlSecondsAfterFinished: 3600
+  # Hard ceiling so a stuck run cannot hog the cluster forever.
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: pas-thesis
+        app.kubernetes.io/component: loadtest
+        loadtest.stack: "__STACK__"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: grafana/k6:0.49.0
+          # Run the mounted script. --no-usage-report keeps k6 offline-friendly.
+          args:
+            - "run"
+            - "--no-usage-report"
+            - "/scripts/scale_incluster.js"
+          env:
+            - name: STACK
+              value: "__STACK__"
+            - name: BASE_USER
+              value: "http://__STACK__-user.pas-thesis.svc.cluster.local:8080"
+            - name: BASE_PRODUCT
+              value: "http://__STACK__-product.pas-thesis.svc.cluster.local:8080"
+            - name: BASE_ORDER
+              value: "http://__STACK__-order.pas-thesis.svc.cluster.local:8080"
+            # Profile knobs (optional): match the ConfigMap script defaults.
+            - name: SPIKE
+              value: "130"
+            - name: HOLD_VU
+              value: "100"
+            - name: LIGHT
+              value: "5"
+            - name: SUSTAIN
+              value: "150s"
+            - name: THINK
+              value: "0.3"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: k6-script
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: k6-script
+          configMap:
+            name: k6-load-script

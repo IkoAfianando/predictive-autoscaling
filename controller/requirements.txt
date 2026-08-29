@@ -1,0 +1,4 @@
+# Predictive auto-scaling controller runtime dependencies
+kubernetes>=29.0.0
+requests>=2.31.0
+prometheus-client>=0.20.0

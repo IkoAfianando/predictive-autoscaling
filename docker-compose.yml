@@ -1,0 +1,289 @@
+# =============================================================================
+# docker-compose.yml — full local system for the predictive-autoscaling-thesis.
+#
+#   postgres:15 + redis:7 + 12 backend services (4 stacks x {user,product,order}).
+#
+# Each stack (go|rust|java|node) ships ONE image parameterized by SERVICE_NAME
+# (SPEC §7), so the 3 services of a stack share a single build/image and only
+# differ by env. Resource limits are pinned to SPEC §2 (CPU 1.0 / mem 512MB).
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose up -d --build
+#   docker compose config          # validate without building
+#
+# Observability (prometheus/grafana/otel) is authored by the observability agent
+# under ./observability. To run it alongside this stack:
+#   docker compose -f docker-compose.yml -f observability/docker-compose.observability.yml up -d
+# =============================================================================
+
+name: pas-thesis
+
+# --- Reusable fragments (YAML anchors) ---------------------------------------
+
+# Parity env shared by ALL backend services (SPEC §2 / §5).
+x-common-env: &common-env
+  PORT: "8080"
+  REDIS_URL: "redis://redis:6379"
+  BCRYPT_COST: "10"
+  DB_POOL_MAX: "20"
+  CACHE_TTL_SECONDS: "30"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4317}"
+
+# Common service settings: resource limits, restart policy, healthy deps, net.
+x-backend: &backend
+  restart: unless-stopped
+  cpus: "1.0"          # SPEC §2 — container CPU limit
+  mem_limit: 512m      # SPEC §2 — container memory limit
+  networks: [thesis-net]
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+networks:
+  thesis-net:
+    external: true
+    name: thesis-net
+
+volumes:
+  pgdata:
+
+services:
+
+  # --- Infrastructure --------------------------------------------------------
+
+  postgres:
+    image: postgres:15
+    container_name: pas-postgres
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-appuser}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-appsecret}"
+      POSTGRES_DB: "${POSTGRES_DB:-appuser}"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks: [thesis-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-appuser}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7
+    container_name: pas-redis
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks: [thesis-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ===========================================================================
+  # GO stack — ports 8001/8002/8003
+  # ===========================================================================
+  go-user:
+    <<: *backend
+    image: pas/go:latest
+    build: { context: ./services/go }
+    container_name: pas-go-user
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "user"
+      STACK_NAME: "go"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/go_db"
+    ports: ["8001:8080"]
+
+  go-product:
+    <<: *backend
+    image: pas/go:latest
+    build: { context: ./services/go }
+    container_name: pas-go-product
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "product"
+      STACK_NAME: "go"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/go_db"
+    ports: ["8002:8080"]
+
+  go-order:
+    <<: *backend
+    image: pas/go:latest
+    build: { context: ./services/go }
+    container_name: pas-go-order
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "order"
+      STACK_NAME: "go"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/go_db"
+      USER_SERVICE_URL: "http://go-user:8080"
+      PRODUCT_SERVICE_URL: "http://go-product:8080"
+    ports: ["8003:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      go-user:
+        condition: service_started
+      go-product:
+        condition: service_started
+
+  # ===========================================================================
+  # RUST stack — ports 8011/8012/8013
+  # ===========================================================================
+  rust-user:
+    <<: *backend
+    image: pas/rust:latest
+    build: { context: ./services/rust }
+    container_name: pas-rust-user
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "user"
+      STACK_NAME: "rust"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/rust_db"
+    ports: ["8011:8080"]
+
+  rust-product:
+    <<: *backend
+    image: pas/rust:latest
+    build: { context: ./services/rust }
+    container_name: pas-rust-product
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "product"
+      STACK_NAME: "rust"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/rust_db"
+    ports: ["8012:8080"]
+
+  rust-order:
+    <<: *backend
+    image: pas/rust:latest
+    build: { context: ./services/rust }
+    container_name: pas-rust-order
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "order"
+      STACK_NAME: "rust"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/rust_db"
+      USER_SERVICE_URL: "http://rust-user:8080"
+      PRODUCT_SERVICE_URL: "http://rust-product:8080"
+    ports: ["8013:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rust-user:
+        condition: service_started
+      rust-product:
+        condition: service_started
+
+  # ===========================================================================
+  # JAVA stack — ports 8021/8022/8023
+  # ===========================================================================
+  java-user:
+    <<: *backend
+    image: pas/java:latest
+    build: { context: ./services/java }
+    container_name: pas-java-user
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "user"
+      STACK_NAME: "java"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/java_db"
+    ports: ["8021:8080"]
+
+  java-product:
+    <<: *backend
+    image: pas/java:latest
+    build: { context: ./services/java }
+    container_name: pas-java-product
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "product"
+      STACK_NAME: "java"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/java_db"
+    ports: ["8022:8080"]
+
+  java-order:
+    <<: *backend
+    image: pas/java:latest
+    build: { context: ./services/java }
+    container_name: pas-java-order
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "order"
+      STACK_NAME: "java"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/java_db"
+      USER_SERVICE_URL: "http://java-user:8080"
+      PRODUCT_SERVICE_URL: "http://java-product:8080"
+    ports: ["8023:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      java-user:
+        condition: service_started
+      java-product:
+        condition: service_started
+
+  # ===========================================================================
+  # NODE stack — ports 8031/8032/8033
+  # ===========================================================================
+  node-user:
+    <<: *backend
+    image: pas/node:latest
+    build: { context: ./services/node }
+    container_name: pas-node-user
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "user"
+      STACK_NAME: "node"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/node_db"
+    ports: ["8031:8080"]
+
+  node-product:
+    <<: *backend
+    image: pas/node:latest
+    build: { context: ./services/node }
+    container_name: pas-node-product
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "product"
+      STACK_NAME: "node"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/node_db"
+    ports: ["8032:8080"]
+
+  node-order:
+    <<: *backend
+    image: pas/node:latest
+    build: { context: ./services/node }
+    container_name: pas-node-order
+    environment:
+      <<: *common-env
+      SERVICE_NAME: "order"
+      STACK_NAME: "node"
+      DATABASE_URL: "postgres://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-appsecret}@postgres:5432/node_db"
+      USER_SERVICE_URL: "http://node-user:8080"
+      PRODUCT_SERVICE_URL: "http://node-product:8080"
+    ports: ["8033:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      node-user:
+        condition: service_started
+      node-product:
+        condition: service_started

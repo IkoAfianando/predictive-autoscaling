@@ -1,0 +1,38 @@
+# Kustomization for the reactive (baseline) deployment of the full system.
+#   kubectl apply -k infra/k8s
+#
+# Note: the backend images (pas/go, pas/rust, pas/java, pas/node) are built by
+# `docker compose build` from ./services/*. Load them into your cluster first
+# (e.g. `kind load docker-image pas/go:latest`, or push to a registry).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: pas-thesis
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - go.yaml
+  - rust.yaml
+  - java.yaml
+  - node.yaml
+  - hpa.yaml
+
+# init.sql is mounted into the postgres pod via this generated ConfigMap.
+# k8s/init.sql is a verbatim copy of postgres/init.sql (canonical source) —
+# kustomize forbids configMapGenerator file sources outside its own directory,
+# so the copy lives here. Keep the two in sync (or `cp ../postgres/init.sql .`).
+configMapGenerator:
+  - name: pg-init
+    files:
+      - init.sql=init.sql
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: predictive-autoscaling-thesis

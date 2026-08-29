@@ -1,0 +1,54 @@
+# =============================================================
+# ArgoCD Application for the predictive-autoscaling thesis workload.
+#
+#   kubectl apply -f infra/k8s/argocd-app.yaml
+#
+# Source  = the in-cluster git server (infra/k8s/gitserver/git-server.yaml),
+#           path infra/k8s/demo-allstacks (all four stacks, resource-light).
+# Dest    = in-cluster, namespace pas-thesis.
+# Sync    = automated so the ArgoCD topology UI (https://localhost:8090) shows
+#           the live Deployment/Pod tree and it stays Synced/Healthy while the
+#           predictive controller scales replicas up and down.
+#
+# prune=false / selfHeal=false on purpose: the predictive controller mutates
+# `replicas` at runtime; we do NOT want ArgoCD to fight it back to the manifest
+# value. ArgoCD will show replica drift as "OutOfSync" on the replicas field
+# only — which is exactly the scaling you want to watch — while every other
+# field stays Synced.
+# =============================================================
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pas-thesis
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: git://git-server.git-server.svc.cluster.local:9418/pas.git
+    targetRevision: HEAD
+    path: infra/k8s/demo-allstacks
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pas-thesis
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: false
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        maxDuration: 1m
+        factor: 2
+  # Ignore controller-driven replica changes so runtime scaling does not show
+  # as a permanent OutOfSync / trigger a self-heal.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

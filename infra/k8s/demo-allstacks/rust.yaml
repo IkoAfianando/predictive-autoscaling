@@ -1,0 +1,224 @@
+# =============================================================
+# RUST stack — user / product / order
+# Deployment + ClusterIP Service (port 8080) per service.
+# =============================================================
+---
+# rust-user — rust stack, user service (dev host port 8011 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-user
+  namespace: pas-thesis
+  labels:
+    app: rust-user
+    stack: rust
+    service: user
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: rust-user }
+  template:
+    metadata:
+      labels:
+        app: rust-user
+        stack: rust
+        service: user
+    spec:
+      containers:
+        - name: rust-user
+          image: pas/rust:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "user"
+            - name: STACK_NAME
+              value: "rust"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/rust_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-user
+  namespace: pas-thesis
+  labels: { app: rust-user }
+spec:
+  type: ClusterIP
+  selector: { app: rust-user }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# rust-product — rust stack, product service (dev host port 8012 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-product
+  namespace: pas-thesis
+  labels:
+    app: rust-product
+    stack: rust
+    service: product
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: rust-product }
+  template:
+    metadata:
+      labels:
+        app: rust-product
+        stack: rust
+        service: product
+    spec:
+      containers:
+        - name: rust-product
+          image: pas/rust:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "product"
+            - name: STACK_NAME
+              value: "rust"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/rust_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-product
+  namespace: pas-thesis
+  labels: { app: rust-product }
+spec:
+  type: ClusterIP
+  selector: { app: rust-product }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# rust-order — rust stack, order service (dev host port 8013 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rust-order
+  namespace: pas-thesis
+  labels:
+    app: rust-order
+    stack: rust
+    service: order
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: rust-order }
+  template:
+    metadata:
+      labels:
+        app: rust-order
+        stack: rust
+        service: order
+    spec:
+      containers:
+        - name: rust-order
+          image: pas/rust:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "order"
+            - name: STACK_NAME
+              value: "rust"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/rust_db"
+            - name: USER_SERVICE_URL
+              value: "http://rust-user:8080"
+            - name: PRODUCT_SERVICE_URL
+              value: "http://rust-product:8080"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-order
+  namespace: pas-thesis
+  labels: { app: rust-order }
+spec:
+  type: ClusterIP
+  selector: { app: rust-order }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

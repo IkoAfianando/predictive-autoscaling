@@ -1,0 +1,36 @@
+# ServiceAccount + Role + RoleBinding for the predictive controller.
+# Least privilege: it only needs to read Deployments and patch their scale.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: predictive-controller
+  namespace: autoscale
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: predictive-controller
+  namespace: autoscale
+rules:
+  # Read the managed Deployments.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  # Read and update the scale subresource (this is what changes replica count).
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: predictive-controller
+  namespace: autoscale
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: predictive-controller
+subjects:
+  - kind: ServiceAccount
+    name: predictive-controller
+    namespace: autoscale

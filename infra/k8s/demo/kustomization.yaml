@@ -1,0 +1,57 @@
+# =============================================================
+# VISUAL predictive-scaling demo overlay (go stack only).
+#
+#   kubectl apply -k infra/k8s/demo
+#
+# Why an overlay instead of the full `infra/k8s` base?
+#   * Docker Desktop's single node has 10 CPU / 8 GB. The base requests
+#     1 CPU + 512Mi PER service (12 services) — it cannot fit, and the go
+#     deployments could never scale to 8 replicas.
+#   * The visual demo only needs ONE stack under load, so this overlay
+#     deploys just: config + postgres + redis + the go stack + an
+#     in-cluster Prometheus, and patches every go pod down to 50m/64Mi
+#     so 1 -> 8 replicas schedules comfortably and pods visibly appear.
+#   * NO HorizontalPodAutoscaler is included: the predictive controller is
+#     the ONLY thing that drives replicas here (clean up/down timeline).
+#     The reactive HPA (infra/k8s/hpa.yaml) is the separate baseline.
+# =============================================================
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: pas-thesis
+
+resources:
+  - namespace.yaml
+  - config.yaml
+  - postgres.yaml
+  - redis.yaml
+  - go.yaml
+  - prometheus.yaml
+
+# pg-init mounts init.sql into postgres (creates go_db etc.).
+configMapGenerator:
+  - name: pg-init
+    files:
+      - init.sql
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Shrink the go pods so many replicas fit on a laptop node.
+patches:
+  - target:
+      kind: Deployment
+      name: "go-.*"
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          # Tiny REQUESTS so 1 -> 8 replicas schedule on a laptop node, but a
+          # generous CPU LIMIT (limits are not reservations) so the single
+          # port-forwarded pod under load stays responsive instead of melting.
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "1000m"
+            memory: "256Mi"

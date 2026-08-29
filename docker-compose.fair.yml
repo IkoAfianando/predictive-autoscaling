@@ -1,0 +1,14 @@
+# Fair apple-to-apple: pin bcrypt concurrency = 1 on ALL stacks (match 1.0 CPU limit)
+services:
+  go-user:    { environment: { GOMAXPROCS: "1" } }
+  go-product: { environment: { GOMAXPROCS: "1" } }
+  go-order:   { environment: { GOMAXPROCS: "1" } }
+  node-user:    { environment: { UV_THREADPOOL_SIZE: "1" } }
+  node-product: { environment: { UV_THREADPOOL_SIZE: "1" } }
+  node-order:   { environment: { UV_THREADPOOL_SIZE: "1" } }
+  java-user:    { environment: { BCRYPT_MAX_CONCURRENCY: "1" } }
+  java-product: { environment: { BCRYPT_MAX_CONCURRENCY: "1" } }
+  java-order:   { environment: { BCRYPT_MAX_CONCURRENCY: "1" } }
+  rust-user:    { environment: { BCRYPT_MAX_CONCURRENCY: "1" } }
+  rust-product: { environment: { BCRYPT_MAX_CONCURRENCY: "1" } }
+  rust-order:   { environment: { BCRYPT_MAX_CONCURRENCY: "1" } }

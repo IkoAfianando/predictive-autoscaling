@@ -1,0 +1,197 @@
+# OpenTelemetry Collector configuration
+# Predictive Auto-Scaling Thesis
+#
+# Purpose: stacks that push metrics via OTLP (OTEL_EXPORTER_OTLP_ENDPOINT,
+# SPEC §5) send them here. The collector re-exposes them in Prometheus
+# exposition format on :8889 (scraped by Prometheus) AND optionally
+# remote-writes them straight into Prometheus. Stacks that expose /metrics
+# natively are scraped directly by Prometheus and do not touch the collector.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  # APPLE-TO-APPLE resource metrics: read CPU / memory / RSS straight from the
+  # Docker API for every container, using IDENTICAL methodology across Go, Rust,
+  # Java, and Node (language-agnostic). This is the fair source for the memory
+  # and CPU comparison in the thesis, replacing per-runtime metrics
+  # (go_memstats vs jvm_memory vs nodejs_heap) which are NOT comparable.
+  docker_stats:
+    endpoint: unix:///var/run/docker.sock
+    api_version: "1.44"
+    collection_interval: 10s
+    container_labels_to_metric_labels:
+      com.docker.compose.service: compose_service
+    metrics:
+      container.cpu.utilization: { enabled: true }
+      container.cpu.usage.total: { enabled: true }
+      container.memory.usage.total: { enabled: true }
+      container.memory.rss: { enabled: true }
+      container.memory.usage.limit: { enabled: true }
+      container.memory.percent: { enabled: true }
+
+  prometheus/apps:
+    config:
+      scrape_configs:
+        - job_name: otel-go-user
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["go-user:8080"]
+              labels: { stack: "go", service: "user", collected_via: "otel" }
+        - job_name: otel-go-product
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["go-product:8080"]
+              labels: { stack: "go", service: "product", collected_via: "otel" }
+        - job_name: otel-go-order
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["go-order:8080"]
+              labels: { stack: "go", service: "order", collected_via: "otel" }
+        - job_name: otel-rust-user
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["rust-user:8080"]
+              labels: { stack: "rust", service: "user", collected_via: "otel" }
+        - job_name: otel-rust-product
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["rust-product:8080"]
+              labels: { stack: "rust", service: "product", collected_via: "otel" }
+        - job_name: otel-rust-order
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["rust-order:8080"]
+              labels: { stack: "rust", service: "order", collected_via: "otel" }
+        - job_name: otel-java-user
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["java-user:8080"]
+              labels: { stack: "java", service: "user", collected_via: "otel" }
+        - job_name: otel-java-product
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["java-product:8080"]
+              labels: { stack: "java", service: "product", collected_via: "otel" }
+        - job_name: otel-java-order
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["java-order:8080"]
+              labels: { stack: "java", service: "order", collected_via: "otel" }
+        - job_name: otel-node-user
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["node-user:8080"]
+              labels: { stack: "node", service: "user", collected_via: "otel" }
+        - job_name: otel-node-product
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["node-product:8080"]
+              labels: { stack: "node", service: "product", collected_via: "otel" }
+        - job_name: otel-node-order
+          scrape_interval: 5s
+          metrics_path: /metrics
+          static_configs:
+            - targets: ["node-order:8080"]
+              labels: { stack: "node", service: "order", collected_via: "otel" }
+
+  # Let the collector scrape its own internal telemetry too.
+  prometheus/internal:
+    config:
+      scrape_configs:
+        - job_name: otel-collector-internal
+          scrape_interval: 5s
+          static_configs:
+            - targets: ["0.0.0.0:8888"]
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Guard against runaway memory use inside the collector container.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 25
+
+  # Ensure a `stack`/`service` presence is not lost; the SDKs already set
+  # these as resource/metric attributes, so we only add a marker here.
+  resource:
+    attributes:
+      - key: exported_via
+        value: otel-collector
+        action: upsert
+
+exporters:
+  # Prometheus scrapes this endpoint (see prometheus.yml job otel-collector).
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    # Keep resource attributes (stack, service, ...) as metric labels so the
+    # histogram_quantile queries by $stack keep working for pushed metrics.
+    resource_to_telemetry_conversion:
+      enabled: true
+    enable_open_metrics: true
+
+  # Alternative / additional path: push directly into Prometheus' remote
+  # write receiver. Prometheus must be started with
+  # --web.enable-remote-write-receiver (see docker-compose command).
+  prometheusremotewrite:
+    endpoint: http://prometheus:9090/api/v1/write
+    resource_to_telemetry_conversion:
+      enabled: true
+    tls:
+      insecure: true
+
+  # Handy for debugging what is arriving over OTLP.
+  debug:
+    verbosity: basic
+
+  # Forward traces to the Jaeger all-in-one backend over the internal network.
+  # Jaeger's OTLP gRPC port is 4317 inside the container (COLLECTOR_OTLP_ENABLED).
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  # OpenTelemetry web UI — inspect collector pipelines/receivers/exporters live
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, zpages]
+  telemetry:
+    metrics:
+      address: 0.0.0.0:8888
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus/apps]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheus, debug]
+    # Traces arrive via OTLP and are forwarded to Jaeger. NOTE: backend services
+    # currently emit only Prometheus metrics and do NOT push OTLP traces yet, so
+    # this pipeline stays idle until the services are instrumented with the
+    # OpenTelemetry tracing SDK.
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/jaeger]

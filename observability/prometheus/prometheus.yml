@@ -1,0 +1,183 @@
+# Prometheus scrape configuration
+# Predictive Auto-Scaling Thesis — multi-stack microservices observability
+#
+# Scrapes /metrics from all 12 backend services (4 stacks x 3 services),
+# the OpenTelemetry Collector, and Prometheus itself.
+#
+# All backend services listen on internal port 8080 and are reachable via
+# docker-compose service DNS names of the form {stack}-{service} (SPEC §5).
+# Every service already emits `stack` and `service` labels on its metrics,
+# but we ALSO inject them here via static label sets + relabeling so the
+# labels are guaranteed present and consistent even if a stack forgets them.
+
+global:
+  scrape_interval: 5s
+  scrape_timeout: 5s
+  evaluation_interval: 15s
+  external_labels:
+    project: predictive-autoscaling-thesis
+
+scrape_configs:
+  # ----------------------------------------------------------------------
+  # Go stack
+  # ----------------------------------------------------------------------
+  - job_name: go-user
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["go-user:8080"]
+        labels:
+          stack: go
+          service: user
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: go-product
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["go-product:8080"]
+        labels:
+          stack: go
+          service: product
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: go-order
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["go-order:8080"]
+        labels:
+          stack: go
+          service: order
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ----------------------------------------------------------------------
+  # Rust stack
+  # ----------------------------------------------------------------------
+  - job_name: rust-user
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["rust-user:8080"]
+        labels:
+          stack: rust
+          service: user
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: rust-product
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["rust-product:8080"]
+        labels:
+          stack: rust
+          service: product
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: rust-order
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["rust-order:8080"]
+        labels:
+          stack: rust
+          service: order
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ----------------------------------------------------------------------
+  # Java stack
+  # ----------------------------------------------------------------------
+  - job_name: java-user
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["java-user:8080"]
+        labels:
+          stack: java
+          service: user
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: java-product
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["java-product:8080"]
+        labels:
+          stack: java
+          service: product
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: java-order
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["java-order:8080"]
+        labels:
+          stack: java
+          service: order
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ----------------------------------------------------------------------
+  # Node.js stack
+  # ----------------------------------------------------------------------
+  - job_name: node-user
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["node-user:8080"]
+        labels:
+          stack: node
+          service: user
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: node-product
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["node-product:8080"]
+        labels:
+          stack: node
+          service: product
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: node-order
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["node-order:8080"]
+        labels:
+          stack: node
+          service: order
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ----------------------------------------------------------------------
+  # OpenTelemetry Collector — scrape the prometheus exporter (:8889) so
+  # OTLP-pushed metrics from any stack land in Prometheus, plus the
+  # collector's own internal telemetry (:8888).
+  # ----------------------------------------------------------------------
+  - job_name: otel-collector
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["otel-collector:8888"]
+        labels:
+          source: otel-internal
+
+  # ----------------------------------------------------------------------
+  # Prometheus self-monitoring
+  # ----------------------------------------------------------------------
+  - job_name: prometheus
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["localhost:9090"]

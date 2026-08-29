@@ -1,0 +1,224 @@
+# =============================================================
+# NODE stack — user / product / order
+# Deployment + ClusterIP Service (port 8080) per service.
+# =============================================================
+---
+# node-user — node stack, user service (dev host port 8031 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-user
+  namespace: pas-thesis
+  labels:
+    app: node-user
+    stack: node
+    service: user
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: node-user }
+  template:
+    metadata:
+      labels:
+        app: node-user
+        stack: node
+        service: user
+    spec:
+      containers:
+        - name: node-user
+          image: pas/node:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "user"
+            - name: STACK_NAME
+              value: "node"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/node_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-user
+  namespace: pas-thesis
+  labels: { app: node-user }
+spec:
+  type: ClusterIP
+  selector: { app: node-user }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# node-product — node stack, product service (dev host port 8032 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-product
+  namespace: pas-thesis
+  labels:
+    app: node-product
+    stack: node
+    service: product
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: node-product }
+  template:
+    metadata:
+      labels:
+        app: node-product
+        stack: node
+        service: product
+    spec:
+      containers:
+        - name: node-product
+          image: pas/node:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "product"
+            - name: STACK_NAME
+              value: "node"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/node_db"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-product
+  namespace: pas-thesis
+  labels: { app: node-product }
+spec:
+  type: ClusterIP
+  selector: { app: node-product }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+# node-order — node stack, order service (dev host port 8033 in compose).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-order
+  namespace: pas-thesis
+  labels:
+    app: node-order
+    stack: node
+    service: order
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: node-order }
+  template:
+    metadata:
+      labels:
+        app: node-order
+        stack: node
+        service: order
+    spec:
+      containers:
+        - name: node-order
+          image: pas/node:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef: { name: app-common-config }
+          env:
+            - name: SERVICE_NAME
+              value: "order"
+            - name: STACK_NAME
+              value: "node"
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: password }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: db-credentials, key: username }
+            - name: DATABASE_URL
+              value: "postgres://$(DB_USER):$(DB_PASSWORD)@postgres:5432/node_db"
+            - name: USER_SERVICE_URL
+              value: "http://node-user:8080"
+            - name: PRODUCT_SERVICE_URL
+              value: "http://node-product:8080"
+          readinessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8080 }
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: "1", memory: "512Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-order
+  namespace: pas-thesis
+  labels: { app: node-order }
+spec:
+  type: ClusterIP
+  selector: { app: node-order }
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
