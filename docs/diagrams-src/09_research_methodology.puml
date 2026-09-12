@@ -1,0 +1,79 @@
+@startuml 09_research_methodology
+' Activity diagram — 6-phase experimental research methodology
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam defaultFontName "Helvetica"
+skinparam activity {
+  BackgroundColor #F4F7FB
+  BorderColor #4A6FA5
+  DiamondBackgroundColor #EAF2E9
+  DiamondBorderColor #4A7A45
+}
+title Research Methodology — Experimental Phases
+
+start
+
+:Phase 1 — Design & Parity;
+note right
+  Design the microservice architecture.
+  Enforce apple-to-apple parity across 4 stacks:
+  bcrypt cost 10, DB pool 20, cache TTL 30s,
+  CPU 1.0 / 512MB, identical 72-bucket histogram.
+end note
+
+:Phase 2 — Load & Metric Collection;
+note right
+  Generate load with k6.
+  Scrape metrics into Prometheus.
+  Extract P95 + features via collect.py.
+end note
+
+:Phase 3 — Feature Engineering & Training;
+note right
+  Build lag / rolling / rate / resource features.
+  Train and compare 4 models:
+  LSTM, GRU (proposed) vs XGBoost, Prophet (baseline).
+end note
+
+:Phase 4 — Accuracy Evaluation;
+note right
+  Chronological train/test split (70/15/15).
+  Metrics: RMSE, MAE, sMAPE.
+  Recurrent models retrained over **10 seeds**
+  -> report mean +/- std, not a single run.
+  Significance: Wilcoxon signed-rank across seeds
+  + Diebold-Mariano (HLN-corrected) per sample.
+  Report aggregate AND per-scenario performance.
+end note
+
+:Phase 5 — Deploy & Validate Controller;
+note right
+  Deploy the hybrid predictive controller
+  on Kubernetes.
+  Validate proactive UP / robust DOWN scaling.
+end note
+
+:Phase 6 — Ablation & Hypothesis Testing;
+note right
+  Run full ablation:
+  4 scenarios x 4 sub-intensities x 4 stacks
+  = 64 tests.
+  Test hypotheses H1-H4.
+end note
+
+:Test Hypotheses;
+note right
+  H1: Deep learning (LSTM/GRU) forecasts P95
+      more accurately than baselines in the
+      burst regimes that trigger scale-up.
+  H2: Predictive scaling reduces SLO violations
+      vs reactive scaling.
+  H3: Hybrid UP/DOWN policy outperforms
+      forecast-only or reactive-only policies.
+  H4: Forecast accuracy and scaling gains
+      are consistent across the 4 stacks.
+end note
+
+stop
+
+@enduml
