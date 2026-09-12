@@ -1,0 +1,9 @@
+scenario,stack,dl_wins_in_seeds,of_seeds
+spike,go,10,10
+spike,java,10,10
+soak,go,1,10
+soak,java,10,10
+stress,go,0,10
+stress,java,0,10
+load,go,0,10
+load,java,10,10

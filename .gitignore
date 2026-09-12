@@ -19,6 +19,10 @@ logs/
 results/
 *.log
 
+# canonical evaluation outputs are part of the record
+!evaluation/results/
+!evaluation/results/*.csv
+
 # os / editor
 .DS_Store
 .idea/

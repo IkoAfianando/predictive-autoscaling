@@ -1,0 +1,5 @@
+stack,gru_rmse,lstm_rmse,seed_wilcoxon_p,dm_stat,dm_p,sig_5pct
+go,0.0617,0.1367,0.002,-0.999,0.3201,yes
+rust,0.7887,0.8376,0.0059,-2.029,0.045,yes
+java,2.5711,2.806,0.0273,-2.086,0.0393,yes
+node,0.9922,1.2068,0.0039,-1.78,0.0779,yes

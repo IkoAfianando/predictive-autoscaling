@@ -97,6 +97,28 @@ Or drive the full four-scenario ablation across the stacks:
 ./loadtest/ablation/run_ablation.sh
 ```
 
+## Reproduce the reported numbers
+
+Every forecasting number in [RESULTS.md](RESULTS.md) and in the paper comes from one script:
+
+```bash
+python evaluation/canonical_eval.py
+```
+
+It runs three experiments in a single pass and writes CSVs to `evaluation/results/`:
+
+| Experiment | What it does |
+|---|---|
+| E1 aggregate | 4 models x 4 stacks; GRU and LSTM retrained under 10 seeds, reported as mean ± std, with Wilcoxon and Diebold-Mariano tests for GRU vs LSTM |
+| E2 per-scenario | 4 models x 4 load scenarios x {go, java}; win tally plus how stable that tally is across seeds |
+| E3 transfer | train on stack A, test on stack B, scored with sMAPE so the comparison is scale free |
+
+Charts are regenerated from those CSVs with `python evaluation/make_canonical_charts.py`.
+
+Recurrent models are stochastic, so a single run is not evidence. That is why the tables report a
+spread over ten initializations and why the GRU-versus-LSTM gap is significance-tested rather than
+asserted.
+
 ## Train the forecasters
 
 ```bash
@@ -126,8 +148,9 @@ capacity is always governed by ground truth.
 
 1. Deploy the stacks on Kubernetes and confirm parity (bcrypt cost 10, pool 20, TTL 30 s, 1.0 CPU / 512 MB).
 2. Run the wave workload and collect the latency series.
-3. Train the four forecasters; GRU is the strongest deep model, and deep learning wins on the
-   spike, soak, and saturating regimes that scaling depends on.
+3. Train the four forecasters with `python evaluation/canonical_eval.py`; GRU is the strongest deep
+   model on all four stacks, and deep learning wins both spike regimes, which is what the controller
+   consumes.
 4. Run the controller: it scales one to eight replicas while CPU is still idle and returns to one
    without flapping.
 5. Run the ablation for the per-stack, per-intensity tail-latency response.

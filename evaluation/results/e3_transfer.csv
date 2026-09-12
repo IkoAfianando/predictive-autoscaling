@@ -1,0 +1,17 @@
+train_stack,test_stack,rmse,smape
+go,go,0.0486,53.5
+go,rust,0.7264,140.28
+go,java,1.5908,50.14
+go,node,0.8295,43.89
+rust,go,0.0658,174.91
+rust,rust,0.48,75.81
+rust,java,2.1885,90.1
+rust,node,0.9195,66.51
+java,go,0.2826,173.42
+java,rust,0.6871,145.35
+java,java,2.4424,94.77
+java,node,0.9917,102.39
+node,go,0.1099,115.41
+node,rust,0.7032,130.73
+node,java,2.3284,69.77
+node,node,0.8124,38.37

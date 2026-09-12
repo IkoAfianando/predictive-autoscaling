@@ -1,0 +1,5 @@
+test_stack,self_smape,cross_smape_mean,degradation_ratio
+go,53.5,154.58,2.889
+rust,75.81,138.79,1.831
+java,94.77,70.0,0.739
+node,38.37,70.93,1.849

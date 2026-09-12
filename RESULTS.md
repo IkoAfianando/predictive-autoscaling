@@ -18,16 +18,47 @@ under one identical application configuration, not a raw language-speed ranking.
 
 ## Forecast accuracy
 
-On the aggregate wave workload XGBoost has the lowest RMSE, but that series is dominated by
-near-idle samples where trivial lag persistence is already near-optimal. Decomposed per scenario,
-**deep learning wins five of eight cases**, precisely on the spike, soak, and saturating regimes a
-scaling decision depends on. **GRU is the stronger of the two recurrent models.**
+Every number below comes from `evaluation/canonical_eval.py`, a single reproducible run. Because a
+recurrent model's error depends on its random initialization, GRU and LSTM are each retrained under
+**ten seeds** and reported as mean ± std; the deterministic baselines are trained once.
 
-![model comparison](docs/figures/charts/01_model_comparison.png)
+**Aggregate test RMSE (seconds):**
 
-![GRU vs LSTM](docs/figures/charts/02_gru_vs_lstm.png)
+| Model | go | rust | java | node |
+|---|---|---|---|---|
+| GRU (10 runs) | 0.062 ±0.035 | 0.789 ±0.050 | 2.571 ±0.223 | 0.992 ±0.121 |
+| LSTM (10 runs) | 0.137 ±0.080 | 0.838 ±0.022 | 2.806 ±0.132 | 1.207 ±0.084 |
+| XGBoost | 0.049 | 0.480 | 2.442 | 0.812 |
+| Prophet | 1.410 | 1.808 | 3.405 | 1.900 |
 
-![per-scenario winner](docs/figures/charts/03_scenario_winner.png)
+XGBoost wins the flat aggregate on every stack. That series is dominated by near-idle samples where
+trivial lag persistence is already near-optimal, so the aggregate alone is misleading.
+
+**GRU versus LSTM, tested rather than asserted:**
+
+| Stack | GRU | LSTM | Wilcoxon p (across seeds) | DM p |
+|---|---|---|---|---|
+| go | 0.062 | 0.137 | 0.002 | 0.320 |
+| rust | 0.789 | 0.838 | 0.006 | 0.045 |
+| java | 2.571 | 2.806 | 0.027 | 0.039 |
+| node | 0.992 | 1.207 | 0.004 | 0.078 |
+
+GRU is lower than LSTM on all four stacks and significantly so across initializations. The stricter
+Diebold-Mariano test on per-sample errors reaches significance on rust and java only, so we treat GRU
+as the preferred recurrent model without claiming universal superiority.
+
+![model comparison](docs/figures/charts/can_01_model_comparison.png)
+
+![GRU vs LSTM](docs/figures/charts/can_02_gru_vs_lstm.png)
+
+**Per scenario, deep learning wins four of eight cases** — but it takes *both* spike cases by close to
+an order of magnitude (1.04 vs 8.69 s on go, 0.90 vs 6.93 s on java) and wins them under all ten
+seeds, while the baselines take the steady regimes. Since a scale-up is triggered by bursts and not by
+steady traffic, the regime deep learning wins is the regime the controller consumes. Each per-scenario
+split holds only seven test samples, so this is evidence about regime suitability rather than a
+precise accuracy ranking.
+
+![per-scenario winner](docs/figures/charts/can_03_scenario_winner.png)
 
 ## Load response across scenarios (ablation)
 
@@ -73,10 +104,20 @@ Under identical configuration Rust uses about one nineteenth of Java's resident 
 
 ## Cross-stack model transfer
 
-A model trained on one stack and tested on another degrades by about a third in scale-normalized
-error (sMAPE), strongest for Java and Node, which argues for per-runtime calibration.
+Averaged over the four target stacks, a borrowed model scores about **1.8x** the sMAPE of the
+self-trained one (an 83% degradation). The penalty is heaviest on go (2.9x). Java is the exception:
+its self-trained model scored worse than the borrowed ones on this split, which we attribute to its
+wide latency spread and short test window rather than to genuine transferability. The practical
+reading is unchanged: give each runtime its own model and thresholds.
 
-![transfer heatmap](docs/figures/charts/09_transfer_heatmap.png)
+| Tested on | Self sMAPE | Cross sMAPE (mean) | Ratio |
+|---|---|---|---|
+| go | 53.5 | 154.6 | 2.89 |
+| rust | 75.8 | 138.8 | 1.83 |
+| java | 94.8 | 70.0 | 0.74 |
+| node | 38.4 | 70.9 | 1.85 |
+
+![transfer heatmap](docs/figures/charts/can_04_transfer_heatmap.png)
 
 ## Hypothesis scorecard
 
@@ -84,7 +125,7 @@ error (sMAPE), strongest for Java and Node, which argues for per-runtime calibra
 
 | Hypothesis | Verdict |
 |---|---|
-| H1 Deep learning most accurate (operational regimes) | Supported — DL wins 5/8; GRU strongest deep model |
+| H1 Deep learning most accurate (operational regimes) | Supported for burst regimes — DL wins 4/8 overall but both spike cases (10/10 seeds); GRU lowest on all four stacks (p<0.05) |
 | H2 Predictive scaling cuts reaction time | Supported — scale-up at 0% CPU; ~50 s lead |
 | H3 False-positive rate below 10% | Supported — 6.2% |
-| H4 Models do not transfer across runtimes | Supported (moderate) — ~33% sMAPE degradation |
+| H4 Models do not transfer across runtimes | Supported with one exception — ~83% mean sMAPE degradation; java resists |
